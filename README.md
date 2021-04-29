@@ -40,7 +40,7 @@ See `examples/` for more examples.
 
 ## What problem does it solve?
 
-Expressing logging as capbility of the program, using type classes, is neat. It allows us  to model programs using the
+Expressing logging as a capability of the program, using type classes, is neat. It allows us  to model programs using the
 weakest constraints possible, rather than requiring powerful abilities like `cats.effect.Sync` everywhere. These programs
 are in turn easier to test, because their external dependencies are easily mocked, and easier to reason about, because weaker
 constraints tell us everything we need to know about a program's behaviour.
@@ -62,8 +62,42 @@ DEBUG f.c.r.c.Main - Creating new user with id: e180ea47-f90f-4fee-8c1e-ffa21197
 DEBUG f.c.r.c.Main - Sending welcome e-mail for user with id: e180ea47-f90f-4fee-8c1e-ffa21197b895
 ```
 
+All our traces are sent from the `Main` logger!
+
+
+To remedy this, the log4cats readme suggests creating a logger when you need, as part of the function:
+
+```scala
+def safelyDoThings[F[_]: Sync]: F[Unit] = for {
+  logger <- Slf4jLogger.create[F]
+  _ <- logger.info("Logging at start of safelyDoThings")
+  something <- Sync[F].delay(println("I could do anything"))
+    .onError{case e => logger.error(e)("Something Went Wrong in safelyDoThings")}
+  _ <- logger.info("Logging at end of safelyDoThings")
+} yield something
+```
+
+This defeats the purpose of the libray IMHO, as powerful constraints such as `Sync` cannot be realistically mocked, and
+do not convey meaningful information about the program's behaviour, as `Sync` allows any arbitrary side effect.
+
 Ideally we want the name of the logger to reflect the class where this code belongs, so the traces provide more useful
-information, and we can tune our logging backend depending on the specific logger.
+information, and we can tune our logging backend depending on the specific logger. And we don't want to use very powerful
+type classes such as Sync as part of our business logic.
+
+We could achieve this by instantiating several loggers, and passing them to the services 
+that need them, but then it wouldn't be possible to use implicits (including context bounds), because nothing could tell
+two `Logger`s apart.
 
 This is what this tiny library tries to solve.
 
+## How does it work ?
+
+We define a `NamedLogger[F[_], T]`, where the second type parameter `T` is used to disambiguate multiple loggers
+in the implicit scope. This `T` is bound to a single, named logger, whose name provides more information about the origin
+of the traces.
+
+We provide ways, both pure and impure, to create `NamedLogger`s using the Slf4j backend, in which case a `ClassTag` is
+used to name the logger auto-magically.
+
+Alternatively, a `NamedLogger` can be created from any `Logger`, as it is just a case class, in which case it is your
+responsibility to make sure the underlying logger is properly named.
